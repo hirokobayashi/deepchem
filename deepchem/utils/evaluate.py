@@ -200,12 +200,14 @@ class GeneratorEvaluator(object):
       for feed_dict in self.generator:
         labels = []
         for layer in self.label_keys:
-          labels.append(feed_dict[layer])
+          # labels.append(feed_dict[layer])
+          labels = feed_dict[layer]
+          #y.append(feed_dict[layer])
           del feed_dict[layer]
         for weight in self.weights:
           w.append(feed_dict[weight])
           del feed_dict[weight]
-        y.append(np.array(labels))
+        y.append(labels)
         yield feed_dict
 
     if not len(metrics):
@@ -214,12 +216,12 @@ class GeneratorEvaluator(object):
       mode = metrics[0].mode
     if mode == "classification":
       y_pred = self.model.predict_proba_on_generator(generator_closure())
-      y = np.transpose(np.array(y), axes=[0, 2, 1, 3])
+      # y = np.transpose(np.array(y), axes=[0, 2, 1, 3])
       y = np.reshape(y, newshape=(-1, self.n_tasks, self.n_classes))
       y = from_one_hot(y, axis=-1)
     else:
       y_pred = self.model.predict_proba_on_generator(generator_closure())
-      y = np.transpose(np.array(y), axes=[0, 2, 1, 3])
+      # y = np.transpose(np.array(y), axes=[0, 2, 1, 3])
       y = np.reshape(y, newshape=(-1, self.n_tasks))
       y_pred = np.reshape(y_pred, newshape=(-1, self.n_tasks))
     multitask_scores = {}

@@ -932,17 +932,15 @@ def multitask_logits(features,
   """
   logits_list = []
   with tf.name_scope('multitask_logits'):
-    for task_idx in range(num_tasks):
-      with tf.name_scope(name,
-                         ('task' + str(task_idx).zfill(len(str(num_tasks)))),
-                         [features]):
-        logits_list.append(
-            logits(
+    logits_list.append(
+      tf.reshape(
+        dropout(
+          fully_connected_layer(
                 features,
-                num_classes,
+                num_classes*num_tasks,
                 weight_init=weight_init,
-                bias_init=bias_init,
-                dropout_prob=dropout_prob))
+                bias_init=bias_init),
+                dropout_prob=dropout_prob),(-1, num_tasks, num_classes)))
   return logits_list
 
 

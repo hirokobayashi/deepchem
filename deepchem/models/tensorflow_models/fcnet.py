@@ -495,6 +495,31 @@ class TensorflowMultiTaskClassifier(TensorflowClassifier):
     """
     orig_dict = {}
     orig_dict["mol_features"] = X_b
+    if y_b is not None:
+      orig_dict["labels_0"] = to_one_hot(y_b.flatten(), self.n_classes).reshape(-1,self.n_tasks, self.n_classes)
+    else:
+      # Dummy placeholders
+      orig_dict["labels_0"] = np.squeeze(to_one_hot(np.zeros((self.batch_size*self.n_tasks,)))).reshape(-1, self.n_tasks, self.n_classes)
+    if w_b is not None:
+      orig_dict["weights_0"] = w_b
+    else:
+      # Dummy placeholders
+      orig_dict["weights_0"] = np.ones((self.batch_size,self.n_tasks))
+    return TensorflowGraph.get_feed_dict(orig_dict)
+
+  def construct_feed_dict2(self, X_b, y_b=None, w_b=None, ids_b=None):
+    """Construct a feed dictionary from minibatch data.
+
+    TODO(rbharath): ids_b is not used here. Can we remove it?
+
+    Args:
+      X_b: np.ndarray of shape (batch_size, n_features)
+      y_b: np.ndarray of shape (batch_size, n_tasks)
+      w_b: np.ndarray of shape (batch_size, n_tasks)
+      ids_b: List of length (batch_size) with datapoint identifiers.
+    """
+    orig_dict = {}
+    orig_dict["mol_features"] = X_b
     for task in range(self.n_tasks):
       if y_b is not None:
         orig_dict["labels_%d" % task] = to_one_hot(y_b[:, task])
@@ -578,21 +603,33 @@ class TensorflowMultiTaskRegressor(TensorflowRegressor):
         prev_layer = layer
         prev_layer_size = layer_sizes[i]
 
-      output = []
-      for task in range(self.n_tasks):
+        output = []
         output.append(
-            tf.squeeze(
-                model_ops.fully_connected_layer(
-                    tensor=prev_layer,
-                    size=layer_sizes[i],
-                    weight_init=tf.truncated_normal(
-                        shape=[prev_layer_size, 1],
-                        stddev=weight_init_stddevs[i]),
-                    bias_init=tf.constant(value=bias_init_consts[i], shape=[1
-                                                                           ]))))
+          tf.reshape(
+            model_ops.fully_connected_layer(
+              tensor=prev_layer,
+              size = self.n_tasks,
+              weight_init = tf.truncated_normal(
+                shape = [prev_layer_size, self.n_tasks],
+                stddev=weight_init_stddevs[i]),
+              bias_init=tf.constant(value=bias_init_consts[i], shape=[self.n_tasks]))
+            ,(-1,self.n_tasks)))
+              
+      # output = []
+      # for task in range(self.n_tasks):
+      #   output.append(
+      #       tf.squeeze(
+      #           model_ops.fully_connected_layer(
+      #               tensor=prev_layer,
+      #               size=layer_sizes[i],
+      #               weight_init=tf.truncated_normal(
+      #                   shape=[prev_layer_size, 1],
+      #                   stddev=weight_init_stddevs[i]),
+      #               bias_init=tf.constant(value=bias_init_consts[i], shape=[1
+      #                                                                      ]))))
     return (output, labels, weights)
 
-  def construct_feed_dict(self, X_b, y_b=None, w_b=None, ids_b=None):
+  def construct_feed_dict2(self, X_b, y_b=None, w_b=None, ids_b=None):
     """Construct a feed dictionary from minibatch data.
 
     TODO(rbharath): ids_b is not used here. Can we remove it?
@@ -618,6 +655,31 @@ class TensorflowMultiTaskRegressor(TensorflowRegressor):
         orig_dict["weights_%d" % task] = np.ones((self.batch_size,))
     return TensorflowGraph.get_feed_dict(orig_dict)
 
+  def construct_feed_dict(self, X_b, y_b=None, w_b=None, ids_b=None):
+    """Construct a feed dictionary from minibatch data.
+
+    TODO(rbharath): ids_b is not used here. Can we remove it?
+
+    Args:
+      X_b: np.ndarray of shape (batch_size, n_features)
+      y_b: np.ndarray of shape (batch_size, n_tasks)
+      w_b: np.ndarray of shape (batch_size, n_tasks)
+      ids_b: List of length (batch_size) with datapoint identifiers.
+    """
+    orig_dict = {}
+    orig_dict["mol_features"] = X_b
+    if y_b is not None:
+      orig_dict["labels_0"] = y_b.reshape(-1,self.n_tasks)
+    else:
+      # Dummy placeholders
+      orig_dict["labels_0"] = np.squeeze(np.zeros((self.batch_size,self.n_tasks))).reshape(-1, self.n_tasks)
+    if w_b is not None:
+      orig_dict["weights_0"] = w_b
+    else:
+        # Dummy placeholders
+      orig_dict["weights_0"] = np.ones((self.batch_size,self.n_tasks))
+    return TensorflowGraph.get_feed_dict(orig_dict)
+  
 
 class TensorflowMultiTaskFitTransformRegressor(TensorflowMultiTaskRegressor):
   """Implements a TensorflowMultiTaskRegressor that performs on-the-fly transformation during fit/predict

@@ -668,7 +668,8 @@ class TensorGraph(Model):
 
     if labels is None:
       raise ValueError
-    n_tasks = len(self.outputs)
+    # n_tasks = len(self.outputs)
+    n_tasks = self.n_tasks
     n_classes = self.outputs[0].out_tensor.get_shape()[-1].value
     evaluator = GeneratorEvaluator(
         self,

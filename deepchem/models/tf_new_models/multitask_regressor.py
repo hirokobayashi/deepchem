@@ -95,15 +95,25 @@ class MultitaskGraphRegressor(Model):
     feat = self.model.return_outputs()
     feat_size = feat.get_shape()[-1].value
     outputs = []
-    for task in range(self.n_tasks):
-      outputs.append(
-          tf.squeeze(
-              model_ops.fully_connected_layer(
-                  tensor=feat,
-                  size=1,
-                  weight_init=tf.truncated_normal(
-                      shape=[feat_size, 1], stddev=0.01),
-                  bias_init=tf.constant(value=0., shape=[1]))))
+    outputs.append(
+      tf.reshape(
+        model_ops.fully_connected_layer(
+          tensor=feat,
+          size = self.n_tasks,
+          weight_init=tf.truncated_normal(
+            shape=[feat_size, self.n_tasks],
+            stddev=0.01),
+          bias_init=tf.constant(value=0., shape=[self.n_tasks])),
+        (-1, self.n_tasks)))
+    # for task in range(self.n_tasks):
+    #   outputs.append(
+    #       tf.squeeze(
+    #           model_ops.fully_connected_layer(
+    #               tensor=feat,
+    #               size=1,
+    #               weight_init=tf.truncated_normal(
+    #                   shape=[feat_size, 1], stddev=0.01),
+    #               bias_init=tf.constant(value=0., shape=[1]))))
     return outputs
 
   def add_optimizer(self):
@@ -141,7 +151,7 @@ class MultitaskGraphRegressor(Model):
     feed_dict = merge_dicts([targets_dict, atoms_dict])
     return feed_dict
 
-  def add_training_loss(self, final_loss, outputs):
+  def add_training_loss2(self, final_loss, outputs):
     """Computes loss using logits."""
     loss_fn = get_loss_fn(final_loss)  # Get loss function
     task_losses = []
@@ -164,6 +174,23 @@ class MultitaskGraphRegressor(Model):
     total_loss = tf.div(total_loss, self.batch_size)
     return total_loss
 
+  def add_training_loss(self, final_loss, outputs):
+    """Computes loss using logits."""
+    loss_fn = get_loss_fn(final_loss)  # Get loss function
+    task_losses = []
+    # label_placeholder of shape (batch_size, n_tasks). Split into n_tasks
+    # tensors of shape (batch_size,)
+    task_labels = self.label_placeholder
+    task_weights = self.weight_placeholder
+    #task_weihts = tf.reshape(task_weights, [-1, self.n_tasks,1])
+    task_loss = loss_fn(outputs, task_labels, task_weights)
+    task_losses.append(task_loss)
+    # It's ok to divide by just the batch_size rather than the number of nonzero
+    # examples (effect averages out)
+    total_loss = tf.add_n(task_losses)
+    total_loss = tf.div(total_loss, self.batch_size)
+    return total_loss
+  
   def fit(self,
           dataset,
           nb_epoch=10,
@@ -208,9 +235,10 @@ class MultitaskGraphRegressor(Model):
       batch_outputs = self.sess.run(self.outputs, feed_dict=feed_dict)
 
     n_samples = len(X)
-    outputs = np.zeros((n_samples, self.n_tasks))
-    for task, output in enumerate(batch_outputs):
-      outputs[:, task] = output
+    # outputs = np.zeros((n_samples, self.n_tasks))
+    # for task, output in enumerate(batch_outputs):
+    #   outputs[:, task] = output
+    outputs = batch_outputs[0]
     return outputs
 
   def get_num_tasks(self):

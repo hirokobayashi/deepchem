@@ -14,7 +14,7 @@ from deepchem.models.tensorgraph.graph_layers import WeaveGather, \
 from deepchem.models.tensorgraph.graph_layers import WeaveLayerFactory
 from deepchem.models.tensorgraph.layers import Dense, Concat, SoftMax, \
   SoftMaxCrossEntropy, GraphConv, BatchNorm, \
-  GraphPool, GraphGather, WeightedError, Dropout, BatchNormalization, Stack, Flatten, GraphCNN, GraphCNNPool
+  GraphPool, GraphGather, WeightedError, Dropout, BatchNormalization, Stack, Flatten, GraphCNN, GraphCNNPool, Reshape
 from deepchem.models.tensorgraph.layers import L2Loss, Label, Weights, Feature
 from deepchem.models.tensorgraph.tensor_graph import TensorGraph
 from deepchem.trans import undo_transforms
@@ -694,31 +694,48 @@ class GraphConvTensorGraph(TensorGraph):
 
     costs = []
     self.my_labels = []
-    for task in range(self.n_tasks):
-      if self.mode == 'classification':
-        classification = Dense(
-            out_channels=2, activation_fn=None, in_layers=[readout])
+    if self.mode == 'classification':
+      classification = Dense(
+        out_channels=self.n_tasks*2, activation_fn=None, in_layers=[readout])
+      reshape = Reshape(shape=(-1, self.n_tasks, 2), in_layers=[classification]) 
+      softmax = SoftMax(in_layers=[reshape])
+      self.add_output(softmax)
+      label = Label(shape=(None, self.n_tasks, 2))
+      self.my_labels = [label]
+      cost = SoftMaxCrossEntropy(in_layers=[label, classification])
+    if self.mode == 'regression':
+      regression = Dense(
+        out_channels=self.n_tasks*1, activation_fn=None, in_layers=[readout])
+      self.add_output(regression)
+      label = Label(shape=(None, self.n_tasks, 1))
+      self.my_labels=[label]
+      cost = L2Loss(in_layers=[label, regression])
+    entropy = cost
+    # for task in range(self.n_tasks):
+    #   if self.mode == 'classification':
+    #     classification = Dense(
+    #         out_channels=2, activation_fn=None, in_layers=[readout])
 
-        softmax = SoftMax(in_layers=[classification])
-        self.add_output(softmax)
+    #     softmax = SoftMax(in_layers=[classification])
+    #     self.add_output(softmax)
 
-        label = Label(shape=(None, 2))
-        self.my_labels.append(label)
-        cost = SoftMaxCrossEntropy(in_layers=[label, classification])
-        costs.append(cost)
-      if self.mode == 'regression':
-        regression = Dense(
-            out_channels=1, activation_fn=None, in_layers=[readout])
-        self.add_output(regression)
+    #     label = Label(shape=(None, 2))
+    #     self.my_labels.append(label)
+    #     cost = SoftMaxCrossEntropy(in_layers=[label, classification])
+    #     costs.append(cost)
+    #   if self.mode == 'regression':
+    #     regression = Dense(
+    #         out_channels=1, activation_fn=None, in_layers=[readout])
+    #     self.add_output(regression)
 
-        label = Label(shape=(None, 1))
-        self.my_labels.append(label)
-        cost = L2Loss(in_layers=[label, regression])
-        costs.append(cost)
-    if self.mode == "classification":
-      entropy = Concat(in_layers=costs, axis=-1)
-    elif self.mode == "regression":
-      entropy = Stack(in_layers=costs, axis=1)
+    #     label = Label(shape=(None, 1))
+    #     self.my_labels.append(label)
+    #     cost = L2Loss(in_layers=[label, regression])
+    #     costs.append(cost)
+    # if self.mode == "classification":
+    #   entropy = Concat(in_layers=costs, axis=-1)
+    # elif self.mode == "regression":
+    #   entropy = Stack(in_layers=costs, axis=1)
     self.my_task_weights = Weights(shape=(None, self.n_tasks))
     loss = WeightedError(in_layers=[entropy, self.my_task_weights])
     self.set_loss(loss)
@@ -738,11 +755,15 @@ class GraphConvTensorGraph(TensorGraph):
               pad_batches=pad_batches,
               deterministic=deterministic)):
         d = {}
-        for index, label in enumerate(self.my_labels):
-          if self.mode == 'classification':
-            d[label] = to_one_hot(y_b[:, index])
-          if self.mode == 'regression':
-            d[label] = np.expand_dims(y_b[:, index], -1)
+        # for index, label in enumerate(self.my_labels):
+        #   if self.mode == 'classification':
+        #     d[label] = to_one_hot(y_b[:, index])
+        #   if self.mode == 'regression':
+        #     d[label] = np.expand_dims(y_b[:, index], -1)
+        if self.mode == 'classification':
+          d[self.my_labels[0]] = to_one_hot(y_b.flatten(), 2).reshape(-1, self.n_tasks, 2)
+        if self.mode == 'regression':
+          d[self.my_labels[0]] = np.expand_dims(y_b, -1)
         d[self.my_task_weights] = w_b
         multiConvMol = ConvMol.agglomerate_mols(X_b)
         d[self.atom_features] = multiConvMol.get_atom_features()

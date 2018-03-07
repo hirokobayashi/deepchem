@@ -264,6 +264,43 @@ class TensorflowGraphModel(Model):
       gradient_costs = []  # costs used for gradient calculation
 
       with TensorflowGraph.shared_name_scope('costs', graph, name_scopes):
+        #for task in range(self.n_tasks):
+        #  task_str = str(task).zfill(len(str(self.n_tasks)))
+        with TensorflowGraph.shared_name_scope('cost_', graph, name_scopes):
+          with tf.name_scope('weighted'):
+            weighted_cost = self.cost(output, labels,
+                                      weights)
+            weighted_costs.append(weighted_cost)
+
+          with tf.name_scope('gradient'):
+            # Note that we divide by the batch size and not the number of
+            # non-zero weight examples in the batch.  Also, instead of using
+            # tf.reduce_mean (which can put ops on the CPU) we explicitly
+            # calculate with div/sum so it stays on the GPU.
+            gradient_cost = tf.div(
+              tf.reduce_sum(weighted_cost), self.batch_size)
+            gradient_costs.append(gradient_cost)
+
+      # aggregated costs
+      with TensorflowGraph.shared_name_scope('aggregated', graph,
+                                             name_scopes):
+        with tf.name_scope('gradient'):
+          loss = tf.add_n(gradient_costs)
+
+        # weight decay
+        if self.penalty != 0.0:
+          penalty = model_ops.weight_decay(self.penalty_type, self.penalty)
+          loss += penalty
+
+    return loss
+
+  def add_training_cost2(self, graph, name_scopes, output, labels, weights):
+    with graph.as_default():
+      epsilon = 1e-3  # small float to avoid dividing by zero
+      weighted_costs = []  # weighted costs for each example
+      gradient_costs = []  # costs used for gradient calculation
+
+      with TensorflowGraph.shared_name_scope('costs', graph, name_scopes):
         for task in range(self.n_tasks):
           task_str = str(task).zfill(len(str(self.n_tasks)))
           with TensorflowGraph.shared_name_scope('cost_{}'.format(task_str),
@@ -447,6 +484,25 @@ class TensorflowGraphModel(Model):
     placeholder_scope = TensorflowGraph.get_placeholder_scope(
         graph, name_scopes)
     with placeholder_scope:
+      weights.append(
+        tf.identity(
+          tf.placeholder(
+            tf.float32, shape=[None, self.n_tasks], name='weights_%d' % 0)))
+    return weights
+
+  def add_example_weight_placeholders2(self, graph, name_scopes):
+    """Add Placeholders for example weights for each task.
+
+    This method creates the following Placeholders for each task:
+      weights_%d: Label tensor with shape batch_size.
+
+    Placeholders are wrapped in identity ops to avoid the error caused by
+    feeding and fetching the same tensor.
+    """
+    weights = []
+    placeholder_scope = TensorflowGraph.get_placeholder_scope(
+        graph, name_scopes)
+    with placeholder_scope:
       for task in range(self.n_tasks):
         weights.append(
             tf.identity(
@@ -531,7 +587,8 @@ class TensorflowGraphModel(Model):
       n_samples = len(X_batch)
       y_pred_batch = self.predict_on_batch(X_batch)
       # Discard any padded predictions
-      y_pred_batch = y_pred_batch[:n_samples]
+      #y_pred_batch = y_pred_batch[:n_samples]
+      y_pred_batch = y_pred_batch[:][:n_samples][:]
       y_pred_batch = np.reshape(y_pred_batch, (n_samples, n_tasks))
       y_pred_batch = undo_transforms(y_pred_batch, transformers)
       y_preds.append(y_pred_batch)
@@ -654,6 +711,31 @@ class TensorflowClassifier(TensorflowGraphModel):
     with graph.as_default():
       batch_size = self.batch_size
       n_classes = self.n_classes
+      n_tasks = self.n_tasks
+      labels = []
+      with placeholder_scope:
+        labels.append(
+          tf.identity(
+            tf.placeholder(
+              tf.float32,
+              shape=[None, n_tasks, n_classes],
+              name='labels_%d' % 0)))
+      return labels
+
+  def add_label_placeholders2(self, graph, name_scopes):
+    """Add Placeholders for labels for each task.
+
+    This method creates the following Placeholders for each task:
+      labels_%d: Label tensor with shape batch_size x n_classes.
+
+    Placeholders are wrapped in identity ops to avoid the error caused by
+    feeding and fetching the same tensor.
+    """
+    placeholder_scope = TensorflowGraph.get_placeholder_scope(
+        graph, name_scopes)
+    with graph.as_default():
+      batch_size = self.batch_size
+      n_classes = self.n_classes
       labels = []
       with placeholder_scope:
         for task in range(self.n_tasks):
@@ -664,7 +746,7 @@ class TensorflowClassifier(TensorflowGraphModel):
                       shape=[None, n_classes],
                       name='labels_%d' % task)))
       return labels
-
+    
   def predict_on_batch(self, X):
     """Return model output for the provided input.
 
@@ -700,10 +782,14 @@ class TensorflowClassifier(TensorflowGraphModel):
         feed_dict = self.construct_feed_dict(X)
         data = self._get_shared_session(train=False).run(
             self.eval_graph.output, feed_dict=feed_dict)
-        batch_output = np.asarray(data[:n_tasks], dtype=float)
+        batch_output = np.asarray(data[:n_tasks], dtype=float) # comment out
+        # batch_output = data[0]
+        if batch_output.ndim == 4:
+          batch_output = batch_output.transpose((1,0,2,3))
         # reshape to batch_size x n_tasks x ...
-        if batch_output.ndim == 3:
+        elif batch_output.ndim == 3:
           batch_output = batch_output.transpose((1, 0, 2))
+          #batch_output = batch_output
         elif batch_output.ndim == 2:
           batch_output = batch_output.transpose((1, 0))
         else:
@@ -748,10 +834,12 @@ class TensorflowClassifier(TensorflowGraphModel):
         feed_dict = self.construct_feed_dict(X)
         data = self._get_shared_session(train=False).run(
             self.eval_graph.output, feed_dict=feed_dict)
-        batch_outputs = np.asarray(data[:n_tasks], dtype=float)
+        # batch_outputs = np.asarray(data[:n_tasks], dtype=float)
+        batch_outputs = data[0]
         # reshape to batch_size x n_tasks x ...
         if batch_outputs.ndim == 3:
-          batch_outputs = batch_outputs.transpose((1, 0, 2))
+          # batch_outputs = batch_outputs.transpose((1, 0, 2))
+          batch_outputs = batch_outputs
         elif batch_outputs.ndim == 2:
           batch_outputs = batch_outputs.transpose((1, 0))
         else:
@@ -779,7 +867,7 @@ class TensorflowRegressor(TensorflowGraphModel):
     """No-op for regression models since no softmax."""
     return output
 
-  def cost(self, output, labels, weights):
+  def cost2(self, output, labels, weights):
     """Calculate single-task training cost for a batch of examples.
 
     Args:
@@ -793,7 +881,21 @@ class TensorflowRegressor(TensorflowGraphModel):
     """
     return tf.multiply(0.5 * tf.square(output - labels), weights)
 
-  def add_label_placeholders(self, graph, name_scopes):
+  def cost(self, output, labels, weights):
+    """Calculate single-task training cost for a batch of examples.
+
+    Args:
+      output: Tensor with shape batch_size containing predicted values.
+      labels: Tensor with shape batch_size containing true values.
+      weights: Tensor with shape batch_size containing example weights.
+
+    Returns:
+      A tensor with shape batch_size containing the weighted cost for each
+      example.
+    """
+    return tf.multiply(0.5 * (tf.square(output[0] - labels[0])) , weights[0])
+
+  def add_label_placeholders2(self, graph, name_scopes):
     """Add Placeholders for labels for each task.
 
     This method creates the following Placeholders for each task:
@@ -815,6 +917,29 @@ class TensorflowRegressor(TensorflowGraphModel):
                       tf.float32, shape=[None], name='labels_%d' % task)))
     return labels
 
+  def add_label_placeholders(self, graph, name_scopes):
+    """Add Placeholders for labels for each task.
+
+    This method creates the following Placeholders for each task:
+      labels_%d: Label tensor with shape batch_size.
+
+    Placeholders are wrapped in identity ops to avoid the error caused by
+    feeding and fetching the same tensor.
+    """
+    placeholder_scope = TensorflowGraph.get_placeholder_scope(
+        graph, name_scopes)
+    with graph.as_default():
+      batch_size = self.batch_size
+      n_tasks = self.n_tasks
+      labels = []
+      with placeholder_scope:
+        labels.append(
+          tf.identity(
+            tf.placeholder(
+              tf.float32, shape=[None,n_tasks], name='labels_%d' % 0)))
+    return labels
+
+  
   def predict_on_batch(self, X):
     """Return model output for the provided input.
 
@@ -868,10 +993,11 @@ class TensorflowRegressor(TensorflowGraphModel):
         batch_outputs = batch_outputs[:n_samples]
         outputs.append(batch_outputs)
 
-        outputs = np.squeeze(np.concatenate(outputs))
-
+        #outputs = np.squeeze(np.concatenate(outputs))
+        outputs = np.concatenate(outputs)
+        
     outputs = np.copy(outputs)
-
+    
     # Handle case of 0-dimensional scalar output
     if len(outputs.shape) > 0:
       return outputs[:len_unpadded]

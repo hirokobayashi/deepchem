@@ -173,11 +173,35 @@ class MultitaskGraphClassifier(Model):
     # num_dat_dict = {self.num_datapoints_placeholder : self.}
 
     # Get other optimizer information
-    # TODO(rbharath): Figure out how to handle phase appropriately
+    # TODO(rbharatph): Figure out how to handle phase appropriately
     feed_dict = merge_dicts([targets_dict, atoms_dict])
     return feed_dict
 
   def add_training_loss(self, final_loss, logits):
+    """Computes loss using logits."""
+    loss_fn = get_loss_fn(final_loss)  # Get loss function
+    task_losses = []
+    # label_placeholder of shape (batch_size, n_tasks). Split into n_tasks
+    # tensors of shape (batch_size,)
+    task_labels = self.label_placeholder
+    task_weights = self.weight_placeholder
+    task_weights = tf.reshape(task_weights, [-1, self.n_tasks, 1])
+    # Convert the labels into one-hot vector encodings.
+    # one_hot_labels = tf.to_float(
+    #   tf.reshape(tf.one_hot(tf.to_int32(tf.squeeze(task_labels)), 2),[-1, self.n_tasks, 2]))
+    one_hot_labels = tf.to_float(
+      tf.one_hot(tf.to_int32(tf.squeeze(task_labels)), 2))
+    # Since we use tf.nn.softmax_cross_entropy_with_logits note that we pass in
+    # un-softmaxed logits rather than softmax outputs.
+    task_loss = loss_fn(logits[0], one_hot_labels, task_weights)
+    task_losses.append(task_loss)
+    # It's ok to divide by just the batch_size rather than the number of nonzero
+    # examples (effect averages out)
+    total_loss = tf.add_n(task_losses)
+    total_loss = tf.div(total_loss, self.batch_size)
+    return total_loss
+
+  def add_training_loss2(self, final_loss, logits):
     """Computes loss using logits."""
     loss_fn = get_loss_fn(final_loss)  # Get loss function
     task_losses = []
@@ -260,9 +284,10 @@ class MultitaskGraphClassifier(Model):
       batch_outputs = self.sess.run(self.outputs, feed_dict=feed_dict)
 
     n_samples = len(X)
-    outputs = np.zeros((n_samples, self.n_tasks))
-    for task, output in enumerate(batch_outputs):
-      outputs[:, task] = np.argmax(output, axis=1)
+    # outputs = np.zeros((n_samples, self.n_tasks))
+    # for task, output in enumerate(batch_outputs):
+    #   outputs[:, task] = np.argmax(output, axis=1)
+    outputs = np.argmax(batch_outputs[0], axis=2)
     return outputs
 
   def predict_proba_on_batch(self, X, n_classes=2):
@@ -276,9 +301,10 @@ class MultitaskGraphClassifier(Model):
       batch_outputs = self.sess.run(self.outputs, feed_dict=feed_dict)
 
     n_samples = len(X)
-    outputs = np.zeros((n_samples, self.n_tasks, n_classes))
-    for task, output in enumerate(batch_outputs):
-      outputs[:, task, :] = output
+    # outputs = np.zeros((n_samples, self.n_tasks, n_classes))
+    # for task, output in enumerate(batch_outputs):
+    #   outputs[:, task, :] = output
+    outputs = np.array(batch_outputs[0])
     return outputs
 
   def get_num_tasks(self):
