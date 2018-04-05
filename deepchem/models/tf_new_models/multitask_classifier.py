@@ -83,6 +83,7 @@ class MultitaskGraphClassifier(Model):
                beta1=.9,
                beta2=.999,
                pad_batches=True,
+               configproto=None,
                verbose=True):
 
     warnings.warn("MultitaskGraphClassifier is deprecated. "
@@ -92,7 +93,10 @@ class MultitaskGraphClassifier(Model):
     self.n_tasks = n_tasks
     self.final_loss = final_loss
     self.model = model
-    self.sess = tf.Session(graph=self.model.graph)
+    if configproto:
+      self.sess = tf.Session(graph=self.model.graph, config=configproto)
+    else:
+      self.sess = tf.Session(graph=self.model.graph)
 
     with self.model.graph.as_default():
       # Extract model info

@@ -135,6 +135,7 @@ class TensorflowGraphModel(Model):
                pad_batches=False,
                verbose=True,
                seed=None,
+               configproto=None,
                **kwargs):
     """Constructs the computational graph.
 
@@ -177,6 +178,7 @@ class TensorflowGraphModel(Model):
       Perform logging.
     seed: int
       If not none, is used as random seed for tensorflow.
+    configproto: a tf.ConfigProto() object used to create tf.Session()
     """
     warnings.warn("TensorflowGraphModel is deprecated. "
                   "Will be removed in DeepChem 1.4.", DeprecationWarning)
@@ -197,6 +199,7 @@ class TensorflowGraphModel(Model):
     self.n_classes = n_classes
     self.pad_batches = pad_batches
     self.seed = seed
+    self.configproto = configproto
 
     super(TensorflowGraphModel, self).__init__(
         self, model_dir=logdir, verbose=verbose)
@@ -543,14 +546,22 @@ class TensorflowGraphModel(Model):
     # to run on the CPU instead.
     if train:
       if not self.train_graph.session:
-        config = tf.ConfigProto(allow_soft_placement=True)
+        if self.configproto:
+          config = self.configproto
+          config.allow_soft_placement=True
+        else:
+          config = tf.ConfigProto(allow_soft_placement=True)
         #gpu memory growth option
         config.gpu_options.allow_growth = True
         self.train_graph.session = tf.Session(config=config)
       return self.train_graph.session
     else:
       if not self.eval_graph.session:
-        config = tf.ConfigProto(allow_soft_placement=True)
+        if self.configproto:
+          config = self.configproto
+          config.allow_soft_placement=True
+        else:
+          config = tf.ConfigProto(allow_soft_placement=True)
         #gpu memory growth option
         config.gpu_options.allow_growth = True
         self.eval_graph.session = tf.Session(config=config)
